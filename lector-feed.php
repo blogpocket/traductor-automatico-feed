@@ -1,9 +1,9 @@
 <?php
 /*
-Plugin Name: Lector de Feed con Traducción y XML
-Description: Lee el feed RSS del sitio, guarda título, enlace y descripción en feed.txt, traduce el título y la descripción usando la API de OpenAI y genera un archivo feed.xml. Además, redirige /en/feed a feed.xml.
-Version: 3.8
-Author: Tu Nombre
+Plugin Name: Lector de Feed con Traducción y XML Optimizado
+Description: Lee el feed RSS del sitio, guarda las últimas publicaciones en feed.txt, traduce los títulos y descripciones usando la API de OpenAI y guarda en feed-traducido.txt. Genera un archivo feed.xml con el número configurado de ítems en orden cronológico inverso. Además, redirige /en/feed a feed.xml mediante .htaccess.
+Version: 4.4
+Author: Tu nombre
 */
 
 // Evitar acceso directo al archivo
@@ -32,10 +32,10 @@ function lfp_add_admin_menu() {
     add_submenu_page(
         'lector-feed',                     // Slug del menú principal
         'Configuración de Lector de Feed', // Título de la página
-        'Configuración',                    // Título del submenú
-        'manage_options',                   // Capacidad requerida
-        'lector-feed-configuracion',        // Slug del submenú
-        'lfp_config_page'                   // Función que muestra la página de configuración
+        'Configuración',                   // Título del submenú
+        'manage_options',                  // Capacidad requerida
+        'lector-feed-configuracion',       // Slug del submenú
+        'lfp_config_page'                  // Función que muestra la página de configuración
     );
 }
 
@@ -101,23 +101,41 @@ function lfp_config_page() {
             update_option('lfp_feed_description', $feed_description);
         }
 
-        // Sanear y guardar el número de ítems
-        if (isset($_POST['lfp_feed_items_count'])) {
-            $feed_items_count = intval($_POST['lfp_feed_items_count']);
-            update_option('lfp_feed_items_count', $feed_items_count);
+        // Sanear y guardar el número de ítems a procesar (N)
+        if (isset($_POST['lfp_feed_items_process'])) {
+            $feed_items_process = intval($_POST['lfp_feed_items_process']);
+            update_option('lfp_feed_items_process', $feed_items_process);
         }
 
-        // Mostrar mensaje de éxito
-        echo '<div class="notice notice-success is-dismissible">';
-        echo '<p>Configuración guardada exitosamente.</p>';
-        echo '</div>';
+        // Sanear y guardar el número total de ítems en feed.xml (X)
+        if (isset($_POST['lfp_feed_items_total'])) {
+            $feed_items_total = intval($_POST['lfp_feed_items_total']);
+            update_option('lfp_feed_items_total', $feed_items_total);
+        }
+
+        // Obtener las opciones actualizadas para validación
+        $feed_items_process = get_option('lfp_feed_items_process', 1);
+        $feed_items_total = get_option('lfp_feed_items_total', 10);
+
+        // Validar que X >= N
+        if ($feed_items_total < $feed_items_process) {
+            echo '<div class="notice notice-error is-dismissible">';
+            echo '<p>El número total de ítems en feed.xml (X) debe ser mayor o igual que el número de ítems a procesar (N).</p>';
+            echo '</div>';
+        } else {
+            // Mostrar mensaje de éxito
+            echo '<div class="notice notice-success is-dismissible">';
+            echo '<p>Configuración guardada exitosamente.</p>';
+            echo '</div>';
+        }
     }
 
     // Obtener las opciones almacenadas
     $api_key = get_option('lfp_openai_api_key', '');
     $feed_title = get_option('lfp_feed_title', 'Translated Feed');
     $feed_description = get_option('lfp_feed_description', 'Description of the translated feed');
-    $feed_items_count = get_option('lfp_feed_items_count', 10);
+    $feed_items_process = get_option('lfp_feed_items_process', 1); // Default a 1 ítem
+    $feed_items_total = get_option('lfp_feed_items_total', 10);   // Default a 10 ítems
 
     ?>
     <div class="wrap">
@@ -152,12 +170,20 @@ function lfp_config_page() {
                         <p class="description">La descripción que aparecerá en el feed RSS.</p>
                     </td>
                 </tr>
-                <!-- Número de Ítems -->
+                <!-- Número de Ítems a Procesar (N) -->
                 <tr>
-                    <th scope="row"><label for="lfp_feed_items_count">Número de Ítems en el Feed</label></th>
+                    <th scope="row"><label for="lfp_feed_items_process">Número de Ítems a Procesar (N)</label></th>
                     <td>
-                        <input type="number" name="lfp_feed_items_count" id="lfp_feed_items_count" value="<?php echo esc_attr($feed_items_count); ?>" class="small-text" min="1" required>
-                        <p class="description">Cantidad de ítems que deseas incluir en el archivo feed.xml.</p>
+                        <input type="number" name="lfp_feed_items_process" id="lfp_feed_items_process" value="<?php echo esc_attr($feed_items_process); ?>" class="small-text" min="1" required>
+                        <p class="description">Cantidad de ítems nuevos que deseas procesar y añadir a feed.xml en cada ejecución.</p>
+                    </td>
+                </tr>
+                <!-- Número Total de Ítems en feed.xml (X) -->
+                <tr>
+                    <th scope="row"><label for="lfp_feed_items_total">Número Total de Ítems en feed.xml (X)</label></th>
+                    <td>
+                        <input type="number" name="lfp_feed_items_total" id="lfp_feed_items_total" value="<?php echo esc_attr($feed_items_total); ?>" class="small-text" min="<?php echo esc_attr($feed_items_process); ?>" required>
+                        <p class="description">Cantidad total de ítems que debe contener feed.xml. Debe ser mayor o igual que N.</p>
                     </td>
                 </tr>
             </table>
@@ -188,7 +214,7 @@ function lfp_read_feed() {
 
     $body = wp_remote_retrieve_body($response);
 
-    // Cargar el XML con manejo de espacios de nombres
+    // Cargar el XML
     $rss = simplexml_load_string($body, 'SimpleXMLElement', LIBXML_NOCDATA);
 
     if ($rss === false) {
@@ -198,14 +224,42 @@ function lfp_read_feed() {
         return;
     }
 
-    $output_feed = '<items>' . "\n";         // Inicio de feed.txt
-    $output_traducido = '<items>' . "\n";    // Inicio de feed-traducido.txt
+    // Obtener la cantidad de ítems a procesar (N) y el total de ítems en feed.xml (X)
+    $feed_items_process = get_option('lfp_feed_items_process', 1);
+    $feed_items_total = get_option('lfp_feed_items_total', 10);
 
+    // Validar que X >= N
+    if ($feed_items_total < $feed_items_process) {
+        echo '<div class="notice notice-error is-dismissible">';
+        echo '<p>El número total de ítems en feed.xml (X) debe ser mayor o igual que el número de ítems a procesar (N).</p>';
+        echo '</div>';
+        return;
+    }
+
+    // Obtener los primeros N ítems (últimos N posts)
+    $items = [];
     foreach ($rss->channel->item as $item) {
+        if (count($items) >= $feed_items_process) break;
+        $items[] = $item;
+    }
+
+    if (empty($items)) {
+        echo '<div class="notice notice-error is-dismissible">';
+        echo '<p>No se encontraron ítems en el feed.</p>';
+        echo '</div>';
+        return;
+    }
+
+    $plugin_dir = plugin_dir_path(__FILE__);
+    $file_path_feed = $plugin_dir . 'feed.txt';
+    $file_path_traducido = $plugin_dir . 'feed-traducido.txt';
+
+    $output_feed = "<items>\n";         // Inicio de feed.txt
+    $output_traducido = "<items>\n";    // Inicio de feed-traducido.txt
+
+    foreach ($items as $item) {
         $title = (string)$item->title;
         $link = (string)$item->link;
-
-        // Obtener la descripción directamente de la etiqueta <description>
         $description = (string)$item->description;
 
         // Procesar la descripción eliminando todas las etiquetas HTML
@@ -226,7 +280,6 @@ function lfp_read_feed() {
         $clean_description = html_entity_decode($clean_description, ENT_QUOTES | ENT_XML1, 'UTF-8');
         $clean_description = preg_replace('/[\x00-\x09\x0B\x0C\x0E-\x1F\x7F]/u', '', $clean_description); // Eliminar caracteres de control excepto saltos de línea
         $clean_description = trim($clean_description);
-        // Ya no limitamos los caracteres para tener el contenido completo
 
         // Asegurarse de que no haya saltos de línea extraños
         $title = trim($title);
@@ -239,22 +292,20 @@ function lfp_read_feed() {
         $output_feed .= "    <descripcion>" . htmlspecialchars($clean_description, ENT_QUOTES, 'UTF-8') . "</descripcion>\n";
         $output_feed .= "</item>\n\n";
 
-        // Escribir en feed-traducido.txt con etiquetas en inglés (links sin modificar)
-        $output_traducido .= "<item>\n";
-        $output_traducido .= "    <title>" . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . "</title>\n";
-        $output_traducido .= "    <link>" . htmlspecialchars($link, ENT_QUOTES, 'UTF-8') . "</link>\n"; // No modificar el link
-        $output_traducido .= "    <description>" . htmlspecialchars($clean_description, ENT_QUOTES, 'UTF-8') . "</description>\n";
-        $output_traducido .= "</item>\n\n";
+        // Preparar XML para traducción
+        $item_xml = "<item>\n";
+        $item_xml .= "    <title>" . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . "</title>\n";
+        $item_xml .= "    <link>" . htmlspecialchars($link, ENT_QUOTES, 'UTF-8') . "</link>\n";
+        $item_xml .= "    <description>" . htmlspecialchars($clean_description, ENT_QUOTES, 'UTF-8') . "</description>\n";
+        $item_xml .= "</item>\n";
+
+        $output_traducido .= $item_xml;
     }
 
     $output_feed .= '</items>';
     $output_traducido .= '</items>';
 
-    $plugin_dir = plugin_dir_path(__FILE__);
-    $file_path_feed = $plugin_dir . 'feed.txt';
-    $file_path_traducido = $plugin_dir . 'feed-traducido.txt';
-
-    // Guardar feed.txt
+    // Guardar feed.txt con las últimas N publicaciones
     if (file_put_contents($file_path_feed, $output_feed) === false) {
         echo '<div class="notice notice-error is-dismissible">';
         echo '<p>Error al escribir en feed.txt.</p>';
@@ -262,7 +313,7 @@ function lfp_read_feed() {
         return;
     }
 
-    // Traducir el contenido de feed-traducido.txt
+    // Traducir el contenido de feed-traducido.txt (últimos N ítems)
     $translated_content = lfp_translate_xml_content($output_traducido);
 
     if ($translated_content !== false) {
@@ -274,8 +325,28 @@ function lfp_read_feed() {
             return;
         }
 
-        // Generar feed.xml
-        lfp_generate_xml_feed();
+        // Parsear el contenido traducido para extraer los ítems
+        $translated_xml = simplexml_load_string($translated_content);
+
+        if ($translated_xml === false) {
+            echo '<div class="notice notice-error is-dismissible">';
+            echo '<p>Error al procesar feed-traducido.txt como XML.</p>';
+            echo '</div>';
+            return;
+        }
+
+        // Construir un arreglo de ítems traducidos
+        $translated_items = [];
+        foreach ($translated_xml->item as $translated_item) {
+            $translated_items[] = [
+                'title' => (string)$translated_item->title,
+                'link' => (string)$translated_item->link,
+                'description' => (string)$translated_item->description,
+            ];
+        }
+
+        // Actualizar feed.xml con las nuevas traducciones y mantener X ítems
+        lfp_update_xml_feed($translated_items, $feed_items_process, $feed_items_total);
     } else {
         echo '<div class="notice notice-error is-dismissible">';
         echo '<p>Error al traducir el contenido.</p>';
@@ -358,51 +429,68 @@ function lfp_translate_xml_content($xml_content) {
 }
 
 /**
- * 6. Función para Generar el Archivo feed.xml
+ * 6. Función para Actualizar el Archivo feed.xml
+ * 
+ * @param array $new_translations Arreglo de ítems traducidos.
+ * @param int $n Número de ítems añadidos.
+ * @param int $x Número total de ítems que debe tener feed.xml.
  */
-function lfp_generate_xml_feed() {
+function lfp_update_xml_feed($new_translations, $n, $x) {
     $plugin_dir = plugin_dir_path(__FILE__);
-    $translated_file_path = $plugin_dir . 'feed-traducido.txt';
-
-    if (!file_exists($translated_file_path)) {
-        // Archivo traducido no existe
-        echo '<div class="notice notice-error is-dismissible">';
-        echo '<p>El archivo feed-traducido.txt no existe. Por favor, ejecuta el proceso de lectura y traducción primero.</p>';
-        echo '</div>';
-        return;
-    }
-
-    // Obtener opciones
+    $feed_xml_path = $plugin_dir . 'feed.xml';
     $feed_title = get_option('lfp_feed_title', 'Translated Feed');
     $feed_description = get_option('lfp_feed_description', 'Description of the translated feed');
-    $feed_items_count = get_option('lfp_feed_items_count', 10);
 
-    // Leer el contenido del archivo traducido
-    $content = file_get_contents($translated_file_path);
+    // Inicializar un arreglo para almacenar los ítems traducidos
+    $translated_items = [];
 
-    // Cargar el contenido como XML
-    libxml_use_internal_errors(true);
-    $xml = simplexml_load_string($content);
-    if ($xml === false) {
-        // Mostrar errores de XML
-        $errors = libxml_get_errors();
-        libxml_clear_errors();
-        echo '<div class="notice notice-error is-dismissible">';
-        echo '<p>Error al procesar el archivo feed-traducido.txt como XML.</p>';
-        foreach ($errors as $error) {
-            echo '<p>' . htmlspecialchars($error->message, ENT_QUOTES, 'UTF-8') . '</p>';
+    // Si feed.xml existe, cargar los ítems existentes
+    if (file_exists($feed_xml_path)) {
+        $existing_xml = simplexml_load_file($feed_xml_path);
+        if ($existing_xml !== false) {
+            foreach ($existing_xml->channel->item as $existing_item) {
+                $translated_items[] = [
+                    'title' => (string)$existing_item->title,
+                    'link' => (string)$existing_item->link,
+                    'description' => (string)$existing_item->description,
+                ];
+            }
         }
-        echo '</div>';
-        return;
     }
 
-    // Limitar el número de ítems
-    $items = [];
-    $count = 0;
-    foreach ($xml->item as $item_data) {
-        if ($count >= $feed_items_count) break;
-        $items[] = $item_data;
-        $count++;
+    // Obtener una lista de enlaces originales de los ítems existentes en feed.xml
+    $existing_original_links = [];
+    foreach ($translated_items as $existing_item) {
+        // Extraer el enlace original sin '/en/'
+        $original_link = lfp_get_original_link($existing_item['link']);
+        if ($original_link) {
+            $existing_original_links[] = $original_link;
+        }
+    }
+
+    // Añadir las nuevas traducciones al inicio
+    foreach ($new_translations as $translated_item) {
+        // Verificar si el ítem ya existe en feed.xml para evitar duplicados
+        if (!in_array($translated_item['link'], $existing_original_links)) {
+            // Prepend the new item to translated_items
+            array_unshift($translated_items, [
+                'title' => $translated_item['title'],
+                'link' => $translated_item['link'],
+                'description' => $translated_item['description'],
+            ]);
+            // Añadir el enlace original a la lista para futuras verificaciones
+            $existing_original_links[] = $translated_item['link'];
+        }
+    }
+
+    // Limitar el número de ítems según el número total X
+    if (count($translated_items) > $x) {
+        // Calcular cuántos ítems exceden el límite
+        $excess = count($translated_items) - $x;
+        // Eliminar los ítems más antiguos (los últimos en el arreglo)
+        for ($i = 0; $i < $excess; $i++) {
+            array_pop($translated_items);
+        }
     }
 
     // Crear el XML del feed
@@ -432,22 +520,22 @@ function lfp_generate_xml_feed() {
     $channel->appendChild($channel_language);
 
     // Añadir los ítems
-    foreach ($items as $item_data) {
+    foreach ($translated_items as $item_data) {
         $item = $rss->createElement('item');
 
         // Título
-        $title_text = (string)$item_data->title;
+        $title_text = $item_data['title'];
         $item_title = $rss->createElement('title', htmlspecialchars($title_text, ENT_QUOTES, 'UTF-8'));
         $item->appendChild($item_title);
 
         // Link
-        $original_link = (string)$item_data->link;
+        $original_link = $item_data['link'];
         $modified_link = lfp_insert_en_in_url($original_link);
         $item_link = $rss->createElement('link', htmlspecialchars($modified_link, ENT_QUOTES, 'UTF-8'));
         $item->appendChild($item_link);
 
         // Descripción
-        $description_text = (string)$item_data->description;
+        $description_text = $item_data['description'];
         // Reemplazar saltos de línea con entidades XML para preservarlos
         $description_text = htmlspecialchars($description_text, ENT_QUOTES, 'UTF-8');
         $description_text = str_replace("\n", "&#10;", $description_text);
@@ -458,7 +546,7 @@ function lfp_generate_xml_feed() {
     }
 
     // Guardar el XML en feed.xml
-    if ($rss->save($feed_xml_path = $plugin_dir . 'feed.xml') === false) {
+    if ($rss->save($feed_xml_path) === false) {
         echo '<div class="notice notice-error is-dismissible">';
         echo '<p>Error al guardar feed.xml.</p>';
         echo '</div>';
@@ -466,8 +554,35 @@ function lfp_generate_xml_feed() {
     }
 
     echo '<div class="notice notice-success is-dismissible">';
-    echo '<p>El archivo feed.xml ha sido generado exitosamente.</p>';
+    echo '<p>El archivo feed.xml ha sido actualizado exitosamente.</p>';
     echo '</div>';
+}
+
+/**
+ * Función auxiliar para obtener el enlace original sin '/en/'
+ */
+function lfp_get_original_link($modified_link) {
+    $parsed_url = parse_url($modified_link);
+
+    if (!$parsed_url) {
+        // URL no válida
+        return false;
+    }
+
+    $scheme = isset($parsed_url['scheme']) ? $parsed_url['scheme'] . '://' : '';
+    $host = isset($parsed_url['host']) ? $parsed_url['host'] : '';
+    $port = isset($parsed_url['port']) ? ':' . $parsed_url['port'] : '';
+    $path = isset($parsed_url['path']) ? $parsed_url['path'] : '';
+    $query = isset($parsed_url['query']) ? '?' . $parsed_url['query'] : '';
+    $fragment = isset($parsed_url['fragment']) ? '#' . $parsed_url['fragment'] : '';
+
+    // Eliminar '/en' del path si está presente
+    $path = preg_replace('#^/en/#', '/', $path);
+    $path = preg_replace('#^/en$#', '/', $path);
+
+    $original_link = $scheme . $host . $port . $path . $query . $fragment;
+
+    return $original_link;
 }
 
 /**
@@ -504,41 +619,10 @@ function lfp_insert_en_in_url($url) {
     return $new_url;
 }
 
-
 /**
- * 10. Manejar la Solicitud y Servir feed.xml
- */
-add_action('template_redirect', 'lfp_handle_custom_feed');
-
-function lfp_handle_custom_feed() {
-    $custom_feed = get_query_var('custom_feed');
-
-    if ($custom_feed == 1) {
-        $plugin_dir = plugin_dir_path(__FILE__);
-        $feed_xml = $plugin_dir . 'feed.xml';
-
-        if (file_exists($feed_xml)) {
-            // Establecer el tipo de contenido adecuado para RSS
-            header('Content-Type: application/rss+xml; charset=UTF-8');
-
-            // Leer y enviar el contenido del archivo feed.xml
-            readfile($feed_xml);
-            exit; // Terminar la ejecución para evitar cargar más contenido
-        } else {
-            // Manejar el caso en que feed.xml no existe
-            status_header(404);
-            echo 'Feed not found.';
-            exit;
-        }
-    }
-}
-
-
-/**
- * 12. Seguridad y Buenas Prácticas
+ * 8. Seguridad y Buenas Prácticas
  * - Asegúrate de mantener tu clave de API segura.
  * - Evita exponer rutas internas del servidor.
  * - Sanitiza y valida todas las entradas y salidas.
  */
-
 ?>
