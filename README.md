@@ -8,7 +8,7 @@ Lee el feed RSS del sitio, guarda las últimas publicaciones en feed.txt, traduc
 - Una vez activado, verás un nuevo menú llamado "Lector de Feed" en el panel de administración.
 - Haz clic en "Lector de Feed" y luego en "Configuración".
 - Ingresa tu clave de API de OpenAI.
-- Configura el título del feed, la descripción y el número de ítems que deseas incluir en feed.xml.
+- Configura el título del feed y su descripción.
 - Configura N = el Número de Ítems a Procesar (Cantidad de ítems nuevos que deseas procesar y añadir a feed.xml en cada ejecución).
 - Configura X = el Número Total de Ítems en feed.xml (Cantidad total de ítems que debe contener feed.xml. Debe ser mayor o igual que N).
 - Guarda los cambios.
