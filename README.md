@@ -1,5 +1,5 @@
 # Lector de Feed con Traducción y XML optimizado
-Lee el feed RSS del sitio, guarda las últimas publicaciones en feed.txt, traduce los títulos y descripciones usando la API de OpenAI y guarda en feed-traducido.txt. Genera un archivo feed.xml con el número configurado de ítems en orden cronológico inverso. Además, redirige /en/feed a feed.xml mediante .htaccess. Requiere API de OpenAI (consulta documentación de OpenAI para obtener dicha clave). Requiere modificación del archivo .htaccess para incluir reglas de reescritura.
+Lee el feed RSS del sitio, guarda las últimas publicaciones en feed.txt, traduce los títulos y descripciones usando la API de OpenAI y guarda en feed-traducido.txt. Genera un archivo feed.xml con el número configurado de ítems en orden cronológico inverso. También se configura el número de items a procesar (las últimas publicaciones). Además, redirige /en/feed a feed.xml mediante .htaccess. Requiere API de OpenAI (consulta documentación de OpenAI para obtener dicha clave). Requiere modificación del archivo .htaccess para incluir reglas de reescritura.
 ## Activar el Plugin
 - Ve al panel de administración de WordPress.
 - Navega a "Plugins" > "Plugins instalados".
